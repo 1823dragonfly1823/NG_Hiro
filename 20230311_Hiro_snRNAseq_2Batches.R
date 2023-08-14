@@ -1,4 +1,7 @@
-
+library(Seurat)
+library(xlsx)
+library(ggplot2)
+library(DoubletFinder)
 ####ImportData####
 ##load CellBender output Filtered.H5 files
 LH001.data <- Read10X_h5("./data/LH001/20230310_LH001_CellBender_output_filtered.h5")
@@ -26,11 +29,11 @@ filtered_LH001_seurat <-subset(x = LH001_seurat,
                                           (log10GenesPerUMI>0.9)&
                                           (mitoRatio < 0.15)&
                                           (RiboRatio<0.05)))
+filtered_LH001_seurat <- NormalizeData(filtered_LH001_seurat, normalization.method = "LogNormalize", scale.factor = 10000)
 filtered_LH001_seurat<- CellCycleScoring(filtered_LH001_seurat, 
                                  g2m.features=stringr::str_to_title(tolower(cc.genes$g2m.genes)), 
                                  s.features=stringr::str_to_title(tolower(cc.genes$s.genes)),
                                  set.ident=T)
-filtered_LH001_seurat <- NormalizeData(filtered_LH001_seurat, normalization.method = "LogNormalize", scale.factor = 10000)
 filtered_LH001_seurat <- FindVariableFeatures(filtered_LH001_seurat, selection.method = "vst", nfeatures = 2000)
 filtered_LH001_seurat <- ScaleData(filtered_LH001_seurat, vars.to.regress = c("mitoRatio",
                                                               "S.Score", 
@@ -79,11 +82,11 @@ filtered_LH002_seurat <-subset(x = LH002_seurat,
                                           (log10GenesPerUMI>0.9)&
                                           (mitoRatio < 0.15)&
                                           (RiboRatio<0.05)))
+filtered_LH002_seurat <- NormalizeData(filtered_LH002_seurat, normalization.method = "LogNormalize", scale.factor = 10000)
 filtered_LH002_seurat<- CellCycleScoring(filtered_LH002_seurat, 
                                          g2m.features=stringr::str_to_title(tolower(cc.genes$g2m.genes)), 
                                          s.features=stringr::str_to_title(tolower(cc.genes$s.genes)),
                                          set.ident=T)
-filtered_LH002_seurat <- NormalizeData(filtered_LH002_seurat, normalization.method = "LogNormalize", scale.factor = 10000)
 filtered_LH002_seurat <- FindVariableFeatures(filtered_LH002_seurat, selection.method = "vst", nfeatures = 2000)
 filtered_LH002_seurat <- ScaleData(filtered_LH002_seurat, vars.to.regress = c("mitoRatio",
                                                                               "S.Score", 
@@ -105,6 +108,7 @@ ggplot(bcmvn.LH002,mapping = aes(pK,BCmetric,group=1))+
   geom_line()
 homotypic.prop.LH002 <- modelHomotypic(filtered_LH002_seurat@meta.data$RNA_snn_res.0.1)     
 nExp_poi.LH002 <- round(0.04*nrow(filtered_LH002_seurat@meta.data)) 
+nExp_poi.LH002.adj <- round(nExp_poi.LH002*(1-homotypic.prop.LH002))
 filtered_LH002_seurat <- doubletFinder_v3(filtered_LH002_seurat, PCs = 1:50, pN = 0.25, pK = 0.14, 
                                           nExp = nExp_poi.LH002.adj, reuse.pANN = FALSE, sct = FALSE)
 DimPlot(object = filtered_LH002_seurat,group.by = "DF.classifications_0.25_0.14_147")
@@ -160,19 +164,6 @@ seurat_integrated <- RenameIdents(object = seurat_integrated,
                         "5" = "Hematopoietic",
                         "6" = "Hematopoietic",
                         "7" = "Pericyte")
-###Extract tdtomato expression####
-GENES<-rownames(seurat_integrated)
-CELLS<-colnames(seurat_integrated)
-indMyGene <- which(GENES %in% c("tdWPRE","Lepr"))
-CountMyGeneMyCell<-GetAssayData(object = seurat_integrated, slot = 'counts')[indMyGene, ]
-CountMyGeneMyCell==0
-tdWPRE_zero_Cells<-colnames(CountMyGeneMyCell)[CountMyGeneMyCell[2,]==0]
-tdWPRE_nonzero_Cells<-colnames(CountMyGeneMyCell)[CountMyGeneMyCell[2,]!=0]
-seurat_integrated@meta.data$tdt<-"NA"
-seurat_integrated@meta.data[tdWPRE_zero_Cells,]$tdt<-"zero"
-seurat_integrated@meta.data[tdWPRE_nonzero_Cells,]$tdt<-"nonzero"
-seurat_integrated0@meta.data$tdt<-factor(seurat_integrated0@meta.data$tdt,
-                                               levels=c("zero","nonzero"))
 ###Extract and integrate adipocyte and LepR cells from two batches####
 stromal_seurat<-subset(seurat_integrated, ident = c("LepR+","Adipocyte"))
 stromal_seurat@meta.data$batch<-"0"
@@ -292,6 +283,17 @@ Scillus::plot_heatmap(dataset = ScaleData(seurat_integrated0,use_raster=F),
                       hm_colors = c("purple","black","yellow")
 )
 dev.off()
+###Extract tdtomato expression####
+GENES<-rownames(seurat_integrated0)
+CELLS<-colnames(seurat_integrated0)
+indMyGene <- which(GENES %in% c("tdWPRE","Lepr"))
+CountMyGeneMyCell<-GetAssayData(object = seurat_integrated0, slot = 'counts')[indMyGene, ]
+CountMyGeneMyCell==0
+tdWPRE_zero_Cells<-colnames(CountMyGeneMyCell)[CountMyGeneMyCell[2,]==0]
+tdWPRE_nonzero_Cells<-colnames(CountMyGeneMyCell)[CountMyGeneMyCell[2,]!=0]
+seurat_integrated0@meta.data$tdt<-"NA"
+seurat_integrated0@meta.data[tdWPRE_zero_Cells,]$tdt<-"zero"
+seurat_integrated0@meta.data[tdWPRE_nonzero_Cells,]$tdt<-"nonzero"
 ####Cell type proportion####
 library("aod")
 Data1<-seurat_integrated0@meta.data
@@ -350,3 +352,4 @@ Fabp4AllCells_tdWPRE_nonzero<-FeaturePlot(object = seurat_integrated0_tdWPRE_non
 ggsave(filename = "./result/20230311_LeprAdipocyte_tdWPRE_nonzero_Fabp4AllCells.pdf",
        plot =Fabp4AllCells_tdWPRE_nonzero,
        device="pdf",width = 8,height=8)
+
